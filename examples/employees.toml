@@ -1,0 +1,31 @@
+# Example data-comparator config file.
+# Run with: data-comparator run --config examples/employees.toml
+
+[left]
+type = "file"
+path = "crates/sources/tests/fixtures/employees_a.csv"
+
+[right]
+type = "file"
+path = "crates/sources/tests/fixtures/employees_b.csv"
+
+[compare]
+keys           = ["id"]
+ignore_columns = []          # e.g. ["updated_at", "created_at"]
+max_diffs      = 100
+output_format  = "table"     # table | json | summary
+# output_file = "diff_report.json"   # uncomment to also write to file
+
+# Rename left-side column names to match right-side names.
+# [compare.column_mappings]
+# amount_usd = "amount"
+
+# Per-column comparator overrides.
+[compare.column_options.salary]
+# Accept small rounding differences (e.g. from currency conversion)
+comparator = "numeric_tolerance"
+epsilon    = 0.01
+
+[compare.column_options.name]
+# Ignore case differences on the name column
+comparator = "case_insensitive"

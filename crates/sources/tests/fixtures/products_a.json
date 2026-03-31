@@ -1,0 +1,6 @@
+[
+  {"sku": "P001", "name": "Widget", "price": 9.99, "in_stock": true},
+  {"sku": "P002", "name": "Gadget", "price": 24.99, "in_stock": true},
+  {"sku": "P003", "name": "Doohickey", "price": 4.99, "in_stock": false},
+  {"sku": "P004", "name": "Thingamajig", "price": 14.99, "in_stock": true}
+]

@@ -1,0 +1,31 @@
+[package]
+name = "dc_cli"
+description = "CLI binary for data-comparator"
+version.workspace = true
+edition.workspace = true
+license.workspace = true
+
+[[bin]]
+name = "data-comparator"
+path = "src/main.rs"
+
+[features]
+default  = ["sqlite", "postgres", "mysql"]
+sqlite   = ["dc_sources/sqlite"]
+postgres = ["dc_sources/postgres"]
+mysql    = ["dc_sources/mysql"]
+
+[dependencies]
+dc_core    = { path = "../core" }
+dc_sources = { path = "../sources", default-features = false }
+
+anyhow.workspace     = true
+serde.workspace      = true
+serde_json.workspace = true
+indexmap.workspace   = true
+tokio.workspace      = true
+comfy-table.workspace = true
+colored.workspace    = true
+
+clap  = { version = "4", features = ["derive"] }
+toml  = "0.8"

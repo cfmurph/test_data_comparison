@@ -1,14 +1,37 @@
 # data-comparator
 
-A Rust CLI tool that compares datasets across multiple source types:
+A modular Rust toolkit for comparing datasets across files and databases.
 
-| Mode | Left | Right |
-|------|------|-------|
-| `file-to-file` | CSV / TSV / JSON file | CSV / TSV / JSON file |
-| `db-to-db` | SQL query result | SQL query result |
-| `db-to-file` | SQL query result | CSV / TSV / JSON file |
+---
 
-Supported databases: **SQLite**, **PostgreSQL**, **MySQL / MariaDB**
+## Workspace layout
+
+```
+crates/
+├── core/      – types, comparison engine, traits, TOML config model (no I/O)
+├── sources/   – data source adapters (file, SQLite, PostgreSQL, MySQL)
+└── cli/       – binary: CLI parser, reporter implementations
+examples/      – sample TOML config files
+```
+
+---
+
+## Features
+
+| Capability | Details |
+|---|---|
+| **File sources** | CSV, TSV, JSON (array of objects) |
+| **Database sources** | SQLite, PostgreSQL, MySQL / MariaDB (feature-gated) |
+| **Comparison modes** | Key-based (join) or positional (by index) |
+| **Pluggable comparators** | `ValueComparator` trait; per-column overrides |
+| **Built-in comparators** | Strict, CaseInsensitive, Trim, NumericTolerance |
+| **Column mappings** | Compare `amount_usd` ↔ `amount` across rename |
+| **Column ignoring** | Exclude audit columns (`updated_at`, etc.) |
+| **Diff capping** | `--max-diffs N` / `max_diffs` in config |
+| **Output reporters** | `Reporter` trait; stdout, file, or tee (both) |
+| **Output formats** | table (colored), json, summary |
+| **TOML config** | Full comparison described in a versioned file |
+| **CI integration** | `--fail-on-diff` exits 1 on any difference |
 
 ---
 
@@ -16,20 +39,26 @@ Supported databases: **SQLite**, **PostgreSQL**, **MySQL / MariaDB**
 
 ```bash
 cargo build --release
-# binary at: target/release/data-comparator
+# binary: target/release/data-comparator
+
+# Build without PostgreSQL / MySQL (SQLite only):
+cargo build --release --no-default-features --features sqlite
 ```
 
 ---
 
-## Usage
+## CLI usage
 
 ### file-to-file
 
 ```bash
 data-comparator file-to-file left.csv right.csv
-data-comparator file-to-file left.csv right.csv --key id
+data-comparator file-to-file left.csv right.csv --key id --key region
 data-comparator file-to-file left.json right.json --key sku --format json
 data-comparator file-to-file left.tsv right.tsv --ignore-case --trim
+data-comparator file-to-file a.csv b.csv --map-col amount_usd:amount --key id
+data-comparator file-to-file a.csv b.csv --key id --output diff.json --format json
+data-comparator file-to-file a.csv b.csv --key id --max-diffs 10 --fail-on-diff
 ```
 
 ### db-to-db
@@ -37,20 +66,20 @@ data-comparator file-to-file left.tsv right.tsv --ignore-case --trim
 ```bash
 # SQLite
 data-comparator db-to-db \
-  "sqlite://production.db" "SELECT * FROM orders" \
-  "sqlite://staging.db"    "SELECT * FROM orders" \
-  --key order_id
+  "sqlite://prod.db"    "SELECT * FROM orders ORDER BY id" \
+  "sqlite://staging.db" "SELECT * FROM orders ORDER BY id" \
+  --key id
 
 # PostgreSQL
 data-comparator db-to-db \
-  "postgres://user:pass@host/prod"    "SELECT id, amount FROM payments" \
-  "postgres://user:pass@host/staging" "SELECT id, amount FROM payments" \
-  --key id
+  "postgres://user:pw@prod/db"    "SELECT id, amount FROM payments" \
+  "postgres://user:pw@staging/db" "SELECT id, amount FROM payments" \
+  --key id --epsilon 0.01
 
 # MySQL
 data-comparator db-to-db \
-  "mysql://user:pass@host/db_a" "SELECT * FROM customers" \
-  "mysql://user:pass@host/db_b" "SELECT * FROM customers" \
+  "mysql://user:pw@host/db_a" "SELECT * FROM customers" \
+  "mysql://user:pw@host/db_b" "SELECT * FROM customers" \
   --key customer_id
 ```
 
@@ -63,75 +92,133 @@ data-comparator db-to-file \
   --key id
 ```
 
+### Config-file driven (recommended for repeatable runs)
+
+```bash
+data-comparator run --config compare.toml
+```
+
 ---
 
-## Options
+## TOML config format
+
+```toml
+[left]
+type = "file"          # or "database"
+path = "left.csv"
+
+[right]
+type              = "database"
+connection_string = "postgres://user:pw@host/db"
+query             = "SELECT id, name, amount FROM orders"
+label             = "production"
+
+[compare]
+keys           = ["id"]
+ignore_columns = ["updated_at", "created_at"]
+max_diffs      = 100
+output_format  = "table"    # table | json | summary
+output_file    = "diff.json"
+
+[compare.column_mappings]
+amount_usd = "amount"       # left column → right column
+
+[compare.column_options.amount]
+comparator = "numeric_tolerance"
+epsilon    = 0.001
+
+[compare.column_options.name]
+comparator = "case_insensitive"
+```
+
+See `examples/` for full sample configs.
+
+---
+
+## CLI options reference
 
 | Flag | Description |
-|------|-------------|
-| `--key COLUMN` | Join key column(s); repeatable. Omit for positional comparison. |
+|---|---|
+| `--key COLUMN` | Join key column(s) (repeatable) |
 | `--format table\|json\|summary` | Output format (default: `table`) |
+| `--output FILE` | Write output to file (also prints to stdout) |
 | `--ignore-case` | Case-insensitive string comparison |
 | `--trim` | Strip whitespace before comparing |
-| `--loose-numeric` | Treat `100` (int) and `100.0` (float) as equal |
-| `--ignore-col COLUMN` | Exclude a column from comparison; repeatable |
-| `--fail-on-diff` | Exit with code 1 if any differences are found (useful in CI) |
+| `--loose-numeric` | Accept int/float cross-type equality |
+| `--epsilon N` | Numeric tolerance (implies `--loose-numeric`) |
+| `--ignore-col COLUMN` | Exclude column (repeatable) |
+| `--map-col LEFT:RIGHT` | Rename left column to match right (repeatable) |
+| `--max-diffs N` | Stop after N row diffs |
+| `--fail-on-diff` | Exit 1 if any differences found |
 
 ---
 
-## Output formats
+## Extending the library
 
-### `table` (default)
+### Custom comparator
 
-```
-Comparing  employees_a.csv (5 rows)  vs  employees_b.csv (5 rows)
-  Matching rows:         3
-  Left-only rows:        1
-  Right-only rows:       1
-  Modified rows:         1
+```rust
+use dc_core::value_cmp::ValueComparator;
+use dc_core::Value;
 
-✖ Datasets differ.
+struct FuzzyDateComparator;
 
-  ~ MODIFIED id=2
-    +--------+-------+-------+
-    | Column | Left  | Right |
-    +========================+
-    | salary | 65000 | 67500 |
-    +--------+-------+-------+
+impl ValueComparator for FuzzyDateComparator {
+    fn equals(&self, left: &Value, right: &Value) -> bool {
+        // parse and compare dates with tolerance
+        todo!()
+    }
+    fn name(&self) -> &str { "fuzzy_date" }
+}
 
-  − LEFT ONLY id=4
-  + RIGHT ONLY id=6
+// Register per-column:
+opts.column_comparators.insert("created_at".into(), Arc::new(FuzzyDateComparator));
 ```
 
-### `summary`
+### Custom reporter
 
-One-paragraph stats block, no row detail.
+```rust
+use dc_core::reporter::Reporter;
+use dc_core::compare::ComparisonReport;
 
-### `json`
+struct SlackReporter { webhook_url: String }
 
-Machine-readable JSON report containing the full diff tree.
+impl Reporter for SlackReporter {
+    fn report(&self, report: &ComparisonReport) -> anyhow::Result<()> {
+        // POST to Slack, S3, email, etc.
+        todo!()
+    }
+    fn name(&self) -> &str { "slack" }
+}
+```
+
+### Custom data source adapter
+
+Add a module in `dc_sources/src/` implementing:
+
+```rust
+pub async fn load(adapter: &MyAdapter) -> anyhow::Result<dc_core::Dataset> {
+    // read from HTTP API, Parquet file, Arrow IPC, etc.
+    todo!()
+}
+```
+
+Gate it with a Cargo feature and expose it via `dc_sources::lib`.
 
 ---
 
-## Architecture
+## Database feature flags
 
+```toml
+# In your Cargo.toml:
+dc_sources = { path = "...", default-features = false, features = ["sqlite"] }
 ```
-src/
-├── lib.rs              – module declarations
-├── main.rs             – CLI (clap) + async entry point
-├── types.rs            – Value, Dataset, DataSource, FileSource, DbSource
-├── sources/
-│   ├── mod.rs          – unified load() dispatcher
-│   ├── file.rs         – CSV / TSV / JSON loading
-│   └── db.rs           – SQLite / PostgreSQL / MySQL loading (sqlx)
-├── compare/
-│   ├── mod.rs
-│   ├── engine.rs       – positional & key-based comparison logic
-│   └── result.rs       – ComparisonReport, RowDiff, ColumnDiff types
-└── output/
-    ├── mod.rs
-    └── formatter.rs    – table / json / summary rendering
-```
+
+| Feature | Default | Enables |
+|---|---|---|
+| `sqlite` | ✓ | SQLite via sqlx |
+| `postgres` | ✓ | PostgreSQL via sqlx |
+| `mysql` | ✓ | MySQL / MariaDB via sqlx |
 
 ---
 
@@ -141,14 +228,20 @@ src/
 cargo test
 ```
 
-Tests cover:
+15 integration tests covering:
 
 - Identical TSV files → no differences
-- CSV key-based diff (modified row, left-only, right-only)
+- CSV key-based diff (modified, left-only, right-only rows)
 - JSON key-based diff
 - Positional comparison
-- `--ignore-case` option
-- `--loose-numeric` option  
+- `CaseInsensitiveComparator`
+- `NumericToleranceComparator`
+- Per-column comparator overrides
+- Column mappings (`amount_usd` ↔ `amount`)
+- `ignore_columns`
+- `max_diffs` cap
+- `column_diff_counts` per-column statistics
 - SQLite db-to-db identical
 - SQLite db-to-db with differences
-- SQLite db-to-file comparison
+- SQLite db-to-file cross-source
+- TOML config round-trip
