@@ -1,0 +1,28 @@
+[package]
+name = "dc_sources"
+description = "Data source adapters (file, SQLite, PostgreSQL, MySQL) for data-comparator"
+version.workspace = true
+edition.workspace = true
+license.workspace = true
+
+[features]
+default  = ["sqlite", "postgres", "mysql"]
+sqlite   = ["sqlx/sqlite"]
+postgres = ["sqlx/postgres"]
+mysql    = ["sqlx/mysql"]
+
+[dependencies]
+dc_core = { path = "../core" }
+
+anyhow.workspace     = true
+serde.workspace      = true
+serde_json.workspace = true
+indexmap.workspace   = true
+csv.workspace        = true
+tokio.workspace      = true
+
+sqlx = { workspace = true, optional = true, features = [] }
+
+[dev-dependencies]
+tempfile.workspace = true
+sqlx = { workspace = true, features = ["sqlite"] }

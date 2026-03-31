@@ -1,0 +1,24 @@
+# Example: compare two SQLite databases.
+# Replace the connection strings for postgres:// or mysql:// as needed.
+
+[left]
+type              = "database"
+connection_string = "sqlite://left.db"
+query             = "SELECT id, name, amount FROM orders ORDER BY id"
+label             = "production"
+
+[right]
+type              = "database"
+connection_string = "sqlite://right.db"
+query             = "SELECT id, name, amount FROM orders ORDER BY id"
+label             = "staging"
+
+[compare]
+keys          = ["id"]
+max_diffs     = 50
+output_format = "json"
+output_file   = "diff.json"
+
+[compare.column_options.amount]
+comparator = "numeric_tolerance"
+epsilon    = 0.001
